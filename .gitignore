@@ -1,0 +1,12 @@
+# Ignore specific file types
+*.mlscs
+*.out
+*.psi
+*.trg
+*.upm
+*.log
+*.pyc
+
+# Ignore all .gds files except test.gds
+*.gds
+!test.gds
