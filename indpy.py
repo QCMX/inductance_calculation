@@ -5,8 +5,9 @@ import gdspy
 import subprocess
 import os
 import numpy as np
+import time
 
-def convert_file(filename, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25, find_terminals=False, verbose=True):
+def convert_file(filename, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25, find_terminals=False, verbose=True, res=0.1):
     '''
     Convert a GDS file to an MLSCS file.
     Parameters:
@@ -29,6 +30,8 @@ def convert_file(filename, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25
     find_terminals : bool
         Whether to find terminals in the GDS file. Terminals are assumed to be paths on layer 99.
         Default is False.
+    res: float
+        The resolution for the gds to mlscs conversion. Default is 0.1 um.
     '''
     filename_noext = filename.split('.')[0]
     if verbose:
@@ -43,7 +46,8 @@ def convert_file(filename, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25
     if find_terminals:
         paths = test.get_paths()
         paths = [path for path in paths if path.layers[0] == 99]
-        paths = [path.points for path in paths]
+        paths = np.array([path.points for path in paths])
+        paths = np.round(paths/res, 0)*res
         n_terms = len(paths)
         if verbose:
             print(n_terms, "terminals found.")
@@ -74,9 +78,11 @@ def convert_file(filename, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25
 
     # Add polygons
     for i_cond, layer in enumerate(layerlist):
+        poly_layer = []
         polygons_layer = polygons[layer]
         for polygon in polygons_layer:            
             points = np.array(polygon)
+            points = np.round(points/res, 0)*res
             if not(check_poly_orientation(points)):
                 points = change_poly_orientation(points)
                 if verbose:
@@ -92,22 +98,49 @@ def convert_file(filename, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25
             paths_to_add = sorted(paths_to_add)
             if verbose:
                 print(f"Adding polygon on layer {layer} with {n_terms_in_poly} terminals.")
-            add_to_file += f"polyb {i_cond} "
+            poly_layer_ = f"polyb {i_cond} "
             for i, point in enumerate(points):
                 if n_terms_in_poly > 0:
                     if i in paths_to_add:
                         if verbose:
                             print("{} is a terminal path, adding terminal {}.".format(i, i_term))
-                        add_to_file += f"[{point[0]} {point[1]}] t{i_term} "
+                        poly_layer_ += f"[{point[0]} {point[1]}] t{i_term} "
                         i_term += 1
                     else:
-                        add_to_file += f"[{point[0]} {point[1]}] "
+                        poly_layer_ += f"[{point[0]} {point[1]}] "
                 else:
-                    add_to_file += f"[{point[0]} {point[1]}] "
-            add_to_file += "\n"
+                    poly_layer_ += f"[{point[0]} {point[1]}] "
+            poly_layer.append(poly_layer_)
+        add_to_file += sort_polygons(poly_layer)
     with open(f"{data_folder}{filename_noext}.mlscs", "a") as f:
         f.writelines(add_to_file)    
     
+def sort_polygons(poly_layer):
+    '''
+    Sort polygons so that those with terminals come first.
+    Parameters:
+    -----------
+    poly_layer : list of str
+        The list of polygons to sort.
+    Returns:
+    --------
+    str
+        The sorted list of polygons.
+
+    '''
+    add_to_file = ""
+    order = np.ones(len(poly_layer))
+    for i, poly in enumerate(poly_layer):
+        if "t" in poly:
+            order[i] = 0
+        else:
+            order[i] = 1
+    sorted_indices = np.argsort(order)
+    for idx in sorted_indices:
+        add_to_file += poly_layer[idx] + "\n"
+
+    return add_to_file
+
 def check_poly_orientation(polygon):
     '''
     Check the orientation of a polygon.
@@ -265,7 +298,23 @@ def get_inductance_matrix(name):
         inductance_dict[(int(inductance[i, 0]), int(inductance[i, 1]))] = inductance[i, 2]
     return inductance_dict
 
-def get_inductance_from_gds(name, check_conv=False, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25, verbose=True):
+def reset_sample(name):
+    '''
+    Remove all files related to a sample.
+    Parameters:
+    -----------
+    name : str
+        The name of the sample (without extension).
+    Returns:
+    --------
+    '''
+    files = os.listdir(data_folder)
+    for file in files:
+        if file.startswith(name + '.') and file.split('.')[-1] not in ['gds', 'GDS']:
+            os.remove(data_folder + file)
+            print("Removed", file)
+
+def get_inductance_from_gds(name, check_conv=False, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25, verbose=True, res=0.1):
     '''
     Convert a GDS file to an MLSCS file and run 3DMLSI software to get inductances.
     Parameters:
@@ -287,15 +336,22 @@ def get_inductance_from_gds(name, check_conv=False, cell_name='TOP', lmbd=0.1, c
         The mesh size parameter for the MLSCS file. Default is 0.25. No idea what it does.
     verbose : bool
         Whether to print progress messages. Default is True.
+    res: float
+        The resolution for the gds to mlscs conversion. Default is 0.1 um.
     Returns:
     --------
     dict
         A dictionary with the inductance matrix. The keys are tuples (i, j) and the values are the inductance values (in pH).
     '''
-    convert_file(name + '.gds', find_terminals=True, cell_name=cell_name, lmbd=lmbd, conds=conds, ah=ah, ahb=ahb, verbose=verbose)
+    t0 = time.time()
+    convert_file(name + '.gds', find_terminals=True, cell_name=cell_name, lmbd=lmbd, conds=conds, ah=ah, ahb=ahb, verbose=verbose, res=res)
+    t_conv = time.time() - t0
     if check_conv:
         check_mlscs(name)
     simulate_inductance(name, verbose=verbose)
+    t_sim = time.time() - t0 - t_conv
+    if verbose:
+        print(f"Conversion took {t_conv:.2f} s, simulation took {t_sim:.2f} s.")
     inductance = get_inductance_matrix(name)
     if verbose:
         print("Inductance matrix (in pH):")
