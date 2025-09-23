@@ -1,11 +1,14 @@
 mlsi_path = 'C:\\Users\\jgr\\Documents\\3D_MLSI_VK'
 data_folder = 'data/'
 
+max_points_per_polygon = 32 # empirical estimation, to warn user if exceeded
+
 import gdspy
 import subprocess
 import os
 import numpy as np
 import time
+
 
 def convert_file(filename, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25, find_terminals=False, verbose=True, res=0.1):
     '''
@@ -76,13 +79,18 @@ def convert_file(filename, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25
                 add_to_file += f"tp {2*i+1}->{2*i+2}\n"
     i_term = 1
 
+    max_points = 0
     # Add polygons
     for i_cond, layer in enumerate(layerlist):
-        poly_layer = []
+        poly_layer = ""
         polygons_layer = polygons[layer]
         for polygon in polygons_layer:            
             points = np.array(polygon)
             points = np.round(points/res, 0)*res
+            if len(points) > max_points:
+                max_points = len(points)
+            if verbose:
+                print('Writing polygon with {} points on layer {}.'.format(len(points), layer))
             if not(check_poly_orientation(points)):
                 points = change_poly_orientation(points)
                 if verbose:
@@ -96,50 +104,28 @@ def convert_file(filename, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25
                     paths_to_add.append(fp)
             n_terms_in_poly = len(paths_to_add)
             paths_to_add = sorted(paths_to_add)
-            if verbose:
-                print(f"Adding polygon on layer {layer} with {n_terms_in_poly} terminals.")
-            poly_layer_ = f"polyb {i_cond} "
+
+
             for i, point in enumerate(points):
+                if i < len(points)-1:
+                    if not(point[0] == points[i+1][0] and point[1] == points[i+1][1]):
+                        poly_layer += f"ell {i_cond} 0 {point[0]} {point[1]} {points[i+1][0]} {points[i+1][1]}\n"
+                else:
+                    poly_layer += f"ell {i_cond} 0 {point[0]} {point[1]} {points[0][0]} {points[0][1]}\n"
                 if n_terms_in_poly > 0:
                     if i in paths_to_add:
                         if verbose:
                             print("{} is a terminal path, adding terminal {}.".format(i, i_term))
-                        poly_layer_ += f"[{point[0]} {point[1]}] t{i_term} "
+                        poly_layer = poly_layer[:-1] + f"  t {i_term}\n"
                         i_term += 1
-                    else:
-                        poly_layer_ += f"[{point[0]} {point[1]}] "
-                else:
-                    poly_layer_ += f"[{point[0]} {point[1]}] "
-            poly_layer.append(poly_layer_)
-        add_to_file += sort_polygons(poly_layer)
+                
+            add_to_file += poly_layer
     with open(f"{data_folder}{filename_noext}.mlscs", "a") as f:
-        f.writelines(add_to_file)    
-    
-def sort_polygons(poly_layer):
-    '''
-    Sort polygons so that those with terminals come first.
-    Parameters:
-    -----------
-    poly_layer : list of str
-        The list of polygons to sort.
-    Returns:
-    --------
-    str
-        The sorted list of polygons.
+        f.writelines(add_to_file)   
+    if verbose:
+        print(f"Conversion finished. File saved as {data_folder}{filename_noext}.mlscs")
+        
 
-    '''
-    add_to_file = ""
-    order = np.ones(len(poly_layer))
-    for i, poly in enumerate(poly_layer):
-        if "t" in poly:
-            order[i] = 0
-        else:
-            order[i] = 1
-    sorted_indices = np.argsort(order)
-    for idx in sorted_indices:
-        add_to_file += poly_layer[idx] + "\n"
-
-    return add_to_file
 
 def check_poly_orientation(polygon):
     '''
@@ -237,10 +223,24 @@ def run_upm(name, verbose=True):
     if verbose:
         if result == 0:
             print("UPM finished successfully. Output saved in {}.upm".format(name))
+            return result
         else:
             print("UPM finished with errors.")
+            return result
 
-def simulate_inductance(name, verbose=True):
+def run_mlw(name, verbose=True):
+    if verbose:
+        print("Running MLW...")
+    result = subprocess.call([mlsi_path + '\\mlw.exe', data_folder + name + '.upm'])
+    if verbose:
+        if result == 0:
+            print("MLW finished successfully. Output saved in {}.out".format(name))
+            return result
+        else:
+            print("MLW finished with errors.")
+            return result
+
+def simulate_inductance(name, verbose=True, recalc=False):
     '''
     Run the MLW tool. Creates the .upm file if it does not exist.
     Save the results in a .out file.
@@ -248,25 +248,28 @@ def simulate_inductance(name, verbose=True):
     -----------
     name : str
         The name of the MLSCS file (without extension). 
+    verbose : bool
+        Whether to print progress messages. Default is True.
+    recalc : bool
+        Whether to recalculate the inductance even if the .out file already exists. Default is False.
     Returns:
     --------
     '''
     files = os.listdir(data_folder)
-    if name + '.upm' in files:
+    if recalc:
         if verbose:
-            print('upm file found, proceeding to MLW...')
+            print('Recalculation requested...')
+        run_upm(name)
     else:
-        if verbose:
-            print('upm file not found, running UPM first...')
-        run_upm(name)    
-    if verbose:
-        print("Running MLW...")
-    result = subprocess.call([mlsi_path + '\\mlw.exe', data_folder + name + '.upm'])
-    if verbose:
-        if result == 0:
-            print("MLW finished successfully. Output saved in {}.out".format(name))
+        if name + '.upm' in files:
+            if verbose:
+                print('upm file found, proceeding to MLW...')
         else:
-            print("MLW finished with errors.")
+            if verbose:
+                print('upm file not found, running UPM first...')
+            run_upm(name)
+    result = run_mlw(name)
+    return result
 
 def get_inductance_matrix(name):
     '''
@@ -314,7 +317,7 @@ def reset_sample(name):
             os.remove(data_folder + file)
             print("Removed", file)
 
-def get_inductance_from_gds(name, check_conv=False, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25, verbose=True, res=0.1):
+def get_inductance_from_gds(name, check_conv=False, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25, verbose=True, res=0.1, recalc=False):
     '''
     Convert a GDS file to an MLSCS file and run 3DMLSI software to get inductances.
     Parameters:
@@ -338,6 +341,8 @@ def get_inductance_from_gds(name, check_conv=False, cell_name='TOP', lmbd=0.1, c
         Whether to print progress messages. Default is True.
     res: float
         The resolution for the gds to mlscs conversion. Default is 0.1 um.
+    recalc : bool
+        Whether to recalculate the inductance even if the .out file already exists. Default is False.
     Returns:
     --------
     dict
@@ -348,7 +353,15 @@ def get_inductance_from_gds(name, check_conv=False, cell_name='TOP', lmbd=0.1, c
     t_conv = time.time() - t0
     if check_conv:
         check_mlscs(name)
-    simulate_inductance(name, verbose=verbose)
+    result = simulate_inductance(name, verbose=verbose, recalc=recalc)
+    if result != 0:
+        print("Error in simulation. Returning None.")
+        with open(data_folder + name + '.upm.mlw.log', 'r') as f:
+            lines = f.readlines()
+            print("Last 10 lines of the log file:")
+            for line in lines[-10:]:
+                print(line.strip())
+        return None
     t_sim = time.time() - t0 - t_conv
     if verbose:
         print(f"Conversion took {t_conv:.2f} s, simulation took {t_sim:.2f} s.")
@@ -358,3 +371,4 @@ def get_inductance_from_gds(name, check_conv=False, cell_name='TOP', lmbd=0.1, c
         for (i, j), value in inductance.items():
             print(f"({i}, {j}): {value}")
     return inductance
+

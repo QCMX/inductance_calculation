@@ -4,8 +4,12 @@
 *.psi
 *.trg
 *.upm
+*.dat
 *.log
 *.pyc
+*.ipynb_checkpoints/
+*.ipynb
+
 
 # Ignore all .gds files except test.gds
 *.gds
