@@ -27,6 +27,7 @@ This is a python package to calculate inductances and mutual inductances for sup
 ### Formatting the gds file
 - Try to put as few elements as possible.
 - Use one layer per conductor. You can specify the vertical position and height for each conductor when you run ```indpy.get_inductance_from_gds```. For that, use the ```conds``` parameters (see below).
+- Merge all elements of each layer. The program will crash if two metal polygons (on the same conductor) touch.
 - Use layer 99 to define terminals. They define the current paths. To define a terminal, draw a path in klayout. It has to match one side of a polygon. For the program to work, you need to have an even number of terminals: for each pair, the first terminal is the source of current and the second is the drain.
 
 

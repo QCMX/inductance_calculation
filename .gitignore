@@ -9,6 +9,7 @@
 *.pyc
 *.ipynb_checkpoints/
 *.ipynb
+*.in
 
 
 # Ignore all .gds files except test.gds
