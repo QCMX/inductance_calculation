@@ -220,25 +220,27 @@ def run_upm(name, verbose=True):
     if verbose:
         print("Running UPM...")
     result = subprocess.call([mlsi_path + '\\upm.exe', data_folder + name + '.mlscs'])
-    if verbose:
-        if result == 0:
+    if result == 0:
+        if verbose:
             print("UPM finished successfully. Output saved in {}.upm".format(name))
-            return result
-        else:
+        return result
+    else:
+        if verbose:
             print("UPM finished with errors.")
-            return result
+        return result
 
 def run_mlw(name, verbose=True):
     if verbose:
         print("Running MLW...")
     result = subprocess.call([mlsi_path + '\\mlw.exe', data_folder + name + '.upm'])
-    if verbose:
-        if result == 0:
+    if result == 0:
+        if verbose:
             print("MLW finished successfully. Output saved in {}.out".format(name))
-            return result
-        else:
+        return result
+    else:
+        if verbose:
             print("MLW finished with errors.")
-            return result
+        return result
 
 def simulate_inductance(name, verbose=True, recalc=False):
     '''
@@ -259,7 +261,7 @@ def simulate_inductance(name, verbose=True, recalc=False):
     if recalc:
         if verbose:
             print('Recalculation requested...')
-        run_upm(name)
+        run_upm(name, verbose=verbose)
     else:
         if name + '.upm' in files:
             if verbose:
@@ -267,8 +269,8 @@ def simulate_inductance(name, verbose=True, recalc=False):
         else:
             if verbose:
                 print('upm file not found, running UPM first...')
-            run_upm(name)
-    result = run_mlw(name)
+            run_upm(name, verbose=verbose)
+    result = run_mlw(name, verbose=verbose)
     return result
 
 def get_inductance_matrix(name):
@@ -317,6 +319,92 @@ def reset_sample(name):
             os.remove(data_folder + file)
             print("Removed", file)
 
+
+def move_conductor(mlscsname, conductor, dx=0, dy=0, verbose=False):
+    '''
+    Move a conductor directly in the MLSCS file.
+    Create a new MLSCS file with the moved conductor.
+    Parameters:
+    -----------
+    mlscsname : str
+        The name of the MLSCS file (without extension).
+    conductor : int
+        The conductor to move (0-indexed).
+    dx : float
+        The distance to move in the x direction (in um). Default is 0.
+    dy : float
+        The distance to move in the y direction (in um). Default is 0.
+    verbose : bool
+        Whether to print progress messages. Default is False.
+    Returns:
+    --------
+    '''
+    with open(data_folder + mlscsname + '.mlscs', 'r') as f:
+        lines = f.readlines()
+    for i, line in enumerate(lines):
+        if line.startswith('ell ' + str(conductor)):
+            elts = line.split(' ')
+            if dx != 0:
+                elts[3] = str(float(elts[3]) + dx)
+                elts[5] = str(float(elts[5]) + dx)
+            if dy != 0:
+                elts[4] = str(float(elts[4]) + dy)
+                elts[6] = str(float(elts[6]) + dy)
+            newline = ' '.join(elts)
+            lines[i] = newline
+    if verbose:
+        print('Moved conductor %d by (%.1f, %.1f) µm' % (conductor, dx, dy))
+    with open(data_folder + mlscsname + '_moved.mlscs', 'w') as f:
+        f.writelines(lines)
+    return
+
+def move_conductor_and_simulate(mlscsname, conductor, dx=0, dy=0, verbose=True, recalc=False, del_files=False):
+    '''
+    Move a conductor directly in the MLSCS file and run the simulation.
+    Create a new MLSCS file with the moved conductor.
+    Not really tested, but should work.
+    Parameters:
+    -----------
+    mlscsname : str
+        The name of the MLSCS file (without extension).
+    conductor : int
+        The conductor to move (0-indexed).
+    dx : float
+        The distance to move in the x direction (in um). Default is 0.
+    dy : float
+        The distance to move in the y direction (in um). Default is 0.
+    verbose : bool
+        Whether to print progress messages. Default is True.
+    recalc : bool
+        Whether to recalculate the inductance even if the .out file already exists. Default is False.
+    del_files : bool
+        Whether to delete the generated files after the simulation. Default is False.
+    Returns:
+    --------
+    dict
+        A dictionary with the inductance matrix. The keys are tuples (i, j) and the values are the inductance values (in pH).
+    '''
+    move_conductor(mlscsname, conductor, dx=dx, dy=dy, verbose=verbose)
+    newname = mlscsname + '_moved'
+    result = simulate_inductance(newname, verbose=verbose, recalc=recalc)
+    if result != 0:
+        print("Error in simulation. Returning None.")
+        with open(data_folder + newname + '.upm.mlw.log', 'r') as f:
+            lines = f.readlines()
+            print("Last 10 lines of the log file:")
+            for line in lines[-10:]:
+                print(line.strip())
+        return None
+    inductance = get_inductance_matrix(newname)
+    if verbose:
+        print("Inductance matrix (in pH):")
+        for (i, j), value in inductance.items():
+            print(f"({i}, {j}): {value}")
+    if del_files:
+        reset_sample(newname)
+    return inductance
+
+
 def get_inductance_from_gds(name, check_conv=False, cell_name='TOP', lmbd=0.1, conds=None, ah=1, ahb=0.25, verbose=True, res=0.1, recalc=False):
     '''
     Convert a GDS file to an MLSCS file and run 3DMLSI software to get inductances.
@@ -332,6 +420,7 @@ def get_inductance_from_gds(name, check_conv=False, cell_name='TOP', lmbd=0.1, c
         The London penetration depth (in um) to use in the MLSCS file. Default is 0.1 um.
     conds : list of list of float
         The conductors to use in the MLSCS file. Each conductor is a list of two floats (in um): bottom and top.
+        You can add a third float to that list, defining a London length for that conductor.
         Default is None, putting everyone to [0, 0.1].
     ah: float
         The mesh size parameter for the MLSCS file. Default is 1.0
