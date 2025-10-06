@@ -41,3 +41,17 @@ This is a python package to calculate inductances and mutual inductances for sup
 - ```ah``` is the mesh size parameter for the MLSCS file. Default is 1.0
 - ```ahb``` is similar to ```ah```. Default is 0.25. No idea what it does.
 - ```verbose``` can be set to ```False``` if you want less text to be printed.
+
+
+### Possibility to move conductor
+The ```move_conductor_and_simulate``` function can be used to move a conductor directly in the MLSCS file and then run the simulation. Very useful if you want to see the effect of the distance between two conductors for instance.
+The following code is an example of how do do that:
+
+```
+distances = np.linspace(0, 10, 11) # in µm
+Ms = np.zeros_like(distances)
+for i, d in enumerate(distances):
+    indu = indpy.move_conductor_and_simulate('filename', 1, dx=d, dy=0, verbose=False, recalc=True, del_files=True)
+    Ms[i] = indu[(1, 2)]
+    time.sleep(0.1) # wait a bit to avoid file access conflicts
+```

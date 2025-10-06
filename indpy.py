@@ -303,7 +303,7 @@ def get_inductance_matrix(name):
         inductance_dict[(int(inductance[i, 0]), int(inductance[i, 1]))] = inductance[i, 2]
     return inductance_dict
 
-def reset_sample(name):
+def reset_sample(name, verbose=True):
     '''
     Remove all files related to a sample.
     Parameters:
@@ -317,7 +317,9 @@ def reset_sample(name):
     for file in files:
         if file.startswith(name + '.') and file.split('.')[-1] not in ['gds', 'GDS']:
             os.remove(data_folder + file)
-            print("Removed", file)
+            if verbose:
+                print('Removed file:', file)
+    return
 
 
 def move_conductor(mlscsname, conductor, dx=0, dy=0, verbose=False):
@@ -362,7 +364,6 @@ def move_conductor_and_simulate(mlscsname, conductor, dx=0, dy=0, verbose=True, 
     '''
     Move a conductor directly in the MLSCS file and run the simulation.
     Create a new MLSCS file with the moved conductor.
-    Not really tested, but should work.
     Parameters:
     -----------
     mlscsname : str
@@ -401,7 +402,7 @@ def move_conductor_and_simulate(mlscsname, conductor, dx=0, dy=0, verbose=True, 
         for (i, j), value in inductance.items():
             print(f"({i}, {j}): {value}")
     if del_files:
-        reset_sample(newname)
+        reset_sample(newname, verbose=verbose)
     return inductance
 
 
