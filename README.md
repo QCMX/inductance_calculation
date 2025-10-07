@@ -7,7 +7,7 @@ This is a python package to calculate inductances and mutual inductances for sup
 ## Installation
 - Clone this folder on your computer.
 - Copy the 3D-MLSI folder somewhere on your computer (it is in roger/QCMX/Softwares/3D_MLSI_VK).
-- Put the 3D-MLSI folder path in the first line of indpy.py
+- Put the 3D-MLSI folder path in the first line of indpy.py. It may cause issues if this path as blank spaces in it.
 - Open a python console in the folder containing indpy.py.
 - Dependencies: you need the following python packages
   - numpy
